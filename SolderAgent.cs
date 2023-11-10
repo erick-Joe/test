@@ -12,34 +12,55 @@ public class SolderAgent : Agent
     public List<Transform> EnemyPathChecks = new List<Transform>();
     public Vector3 startingPosition = new Vector3(-2923.3f, 0f, 840.9f);
     public CharacterController characterController;
-    public float speed = 10f;
+    public float speed = 110f;
     public float rayCastLength = 60f;
     public float rotationSpeed = 180f;
+    float thresholdDistance = 5.5f;
     public Animator animator;
     //All enemies in the environment
     public GameObject Enemy1;
     public GameObject Enemy2;
     public GameObject Enemy3;
     public GameObject Enemy4;
+    public GameObject Enemy5;
+    public GameObject Enemy6;
+    public GameObject Enemy7;
+    public GameObject Enemy8;
+    public GameObject Enemy9;
+    public GameObject Enemy10;
+    public GameObject Enemy11;
+    public GameObject Enemy12;
+    public GameObject Enemy13;
 
 
-
-    private bool isWalking;
+    private bool startWalking;
     private Transform currentWaypoint;
     private int currentWaypointIndex = 0;
     private object vectorAction;
     private int mainPathCheckpointIndex;
     private int branchPathCheckpointIndex;
     //Variables to help me track the checkpoints
-    private int previousMainPathCheckpointIndex = -1;
-    private int previousBranchPathCheckpointIndex = -1;
-    //Positions of the enemies
-    private Vector3 initialPosition1;
-    private Vector3 initialPosition2;
-    private Vector3 initialPosition3;
-    private Vector3 initialPosition4;
+    private int expectedMainPathCheckpointIndex = 0;
+    private int expectedBranchPathCheckpointIndex = 0;
+
+
+
     private int currentTargetIndex;
-    private bool episodeEnded;
+    // Positions of the enemies (now exposed in the Unity Editor)
+    public Vector3 initialPosition1 = new Vector3(-2627.23f, 0f, 52.2f);
+    public Vector3 initialPosition2 = new Vector3(-3418.9f, 0f, 37.9f);
+    public Vector3 initialPosition3 = new Vector3(-3420.1f, 0f, -571.7f);
+    public Vector3 initialPosition4 = new Vector3(-2912.0f, 0f, -1369f);
+    public Vector3 initialPosition5 = new Vector3(-1911.5f, 0f, -1307f);
+    public Vector3 initialPosition6 = new Vector3(-1902.5f, 0f, -577.7f);
+    public Vector3 initialPosition7 = new Vector3(-2046f, 0f, 16.2f);
+    public Vector3 initialPosition8 = new Vector3(-2517.8f, 0f, 39f);
+    public Vector3 initialPosition9 = new Vector3(-1932.9f, 0f, 28.4f);
+    public Vector3 initialPosition10 = new Vector3(-1164f, 0f, 28.4f);
+    public Vector3 initialPosition11 = new Vector3(-1679.6f, 0f, -1320.1f);
+    public Vector3 initialPosition12 = new Vector3(-1424f, 0f, -570f);
+    public Vector3 initialPosition13 = new Vector3(-1164f, 0f, -570f);
+
 
 
     [SerializeField] private MainPathCheckManager mainPathCheckpoints;
@@ -51,13 +72,13 @@ public class SolderAgent : Agent
         // Initialize the list of main path checkpoints
         foreach (GameObject checkpointObject in GameObject.FindGameObjectsWithTag("MainPathCheck"))
         {
-            MainPathChecks.Add(checkpointObject.transform); // Access the Transform component directly
+            MainPathChecks.Add(checkpointObject.transform); 
         }
 
         // Initialize the list of enemy branch checkpoints
         foreach (GameObject checkpointObject in GameObject.FindGameObjectsWithTag("EnemyPathCheck"))
         {
-            EnemyPathChecks.Add(checkpointObject.transform); // Access the Transform component directly
+            EnemyPathChecks.Add(checkpointObject.transform); 
         }
 
         // Initialize the first checkpoint
@@ -65,8 +86,6 @@ public class SolderAgent : Agent
         {
             currentWaypoint = MainPathChecks[currentWaypointIndex];
         }
-
-
 
     }
 
@@ -82,13 +101,14 @@ public class SolderAgent : Agent
         currentWaypointIndex = 0;
         mainPathCheckpointIndex = 0;
         branchPathCheckpointIndex = 0;
-        previousMainPathCheckpointIndex = -1;
-        previousBranchPathCheckpointIndex = -1;
+        expectedMainPathCheckpointIndex = 0;
+        expectedBranchPathCheckpointIndex = 0;
+
 
 
         //animations
-        isWalking = false;
-        animator.SetBool("IsWalking", isWalking);
+        startWalking = false;
+        animator.SetBool("WalkNow", startWalking);
 
         // Reset checkpoints
         if (MainPathChecks.Count > 0)
@@ -108,19 +128,22 @@ public class SolderAgent : Agent
 
     public override void CollectObservations(VectorSensor sensor)
     {
-
         // Observations for the nearest checkpoint
         if (currentWaypoint != null)
         {
             Vector3 toWaypoint = currentWaypoint.position - transform.position;
-            sensor.AddObservation(toWaypoint.normalized); // Direction to the nearest checkpoint
-            sensor.AddObservation(toWaypoint.magnitude);  // Distance to the nearest checkpoint
+            sensor.AddObservation(toWaypoint.normalized);
+            sensor.AddObservation(toWaypoint.magnitude); 
+        }
+        else
+        {
+            sensor.AddObservation(Vector3.zero);
+            sensor.AddObservation(0f); 
         }
 
         // The position of the agent
-        sensor.AddObservation(transform.localPosition.x);
-        sensor.AddObservation(transform.localPosition.y);
-
+        sensor.AddObservation(transform.position.x);
+        sensor.AddObservation(transform.position.y);
         sensor.AddObservation(transform.position);
 
         // Raycast to detect enemies, walls, and checkpoints
@@ -132,37 +155,99 @@ public class SolderAgent : Agent
 
             if (hitObject.CompareTag("Enemy"))
             {
-                sensor.AddObservation(hitObject.transform.position);
-                float distanceToEnemy = Vector3.Distance(transform.position, hitObject.transform.position);
-                sensor.AddObservation(distanceToEnemy);
+                // Get the enemy's position and calculate the distance to it
+                Vector3 enemyPosition = hitObject.transform.position;
+                float distanceToEnemy = Vector3.Distance(transform.position, enemyPosition);
+                Debug.Log(distanceToEnemy);
+                if (distanceToEnemy < thresholdDistance)
+                {
+                    // The agent is near an enemy, provide a reward of +5
+                    sensor.AddObservation(enemyPosition);
+                    sensor.AddObservation(distanceToEnemy);
+
+                    AddReward(0.0625f);
+                    Debug.Log("Near an enemy. Reward: 0.0625");
+                }
+                else
+                {
+                    // The agent is not within the threshold distance of the enemy
+                    sensor.AddObservation(Vector3.zero);
+                    sensor.AddObservation(0f);
+                }
+
+
             }
+            else
+            {
+                sensor.AddObservation(Vector3.zero);
+                sensor.AddObservation(0f);
+            }
+
             if (hitObject.CompareTag("Wall"))
             {
                 sensor.AddObservation(hitObject.transform.position);
                 float distanceToWall = Vector3.Distance(transform.position, hitObject.transform.position);
                 sensor.AddObservation(distanceToWall);
             }
+            else
+            {
+                sensor.AddObservation(Vector3.zero); 
+                sensor.AddObservation(0f); 
+            }
+
             if (hitObject.CompareTag("Poison"))
             {
                 sensor.AddObservation(hitObject.transform.position);
                 float distanceToPoison = Vector3.Distance(transform.position, hitObject.transform.position);
                 sensor.AddObservation(distanceToPoison);
             }
+            else
+            {
+                sensor.AddObservation(Vector3.zero); 
+                sensor.AddObservation(0f); 
+            }
+
             if (hitObject.CompareTag("EnemyPathCheck"))
             {
                 sensor.AddObservation(hitObject.transform.position);
                 float distanceToEnemyPathCheck = Vector3.Distance(transform.position, hitObject.transform.position);
                 sensor.AddObservation(distanceToEnemyPathCheck);
             }
+            else
+            {
+                sensor.AddObservation(Vector3.zero);
+                sensor.AddObservation(0f); 
+            }
+
             if (hitObject.CompareTag("MainPathCheck"))
             {
                 sensor.AddObservation(hitObject.transform.position);
                 float distanceToMainPathCheck = Vector3.Distance(transform.position, hitObject.transform.position);
                 sensor.AddObservation(distanceToMainPathCheck);
             }
+            else
+            {
+                sensor.AddObservation(Vector3.zero);
+                sensor.AddObservation(0f); 
+            }
         }
-
+        else
+        {
+            // Filling with zeros if no ray hit
+            sensor.AddObservation(Vector3.zero);
+            sensor.AddObservation(0f);
+            sensor.AddObservation(Vector3.zero);
+            sensor.AddObservation(0f);
+            sensor.AddObservation(Vector3.zero);
+            sensor.AddObservation(0f);
+            sensor.AddObservation(Vector3.zero);
+            sensor.AddObservation(0f);
+            sensor.AddObservation(Vector3.zero);
+            sensor.AddObservation(0f);
+        }
     }
+
+
 
     public void OnCollisionEnter(Collision collision)
     {
@@ -174,84 +259,91 @@ public class SolderAgent : Agent
             if (collidedTargetIndex == currentTargetIndex)
             {
                 // The agent collided with the correct target
+                AddReward(+0.5f);
                 DisableTarget(collidedTarget);
                 currentTargetIndex++;
 
-                if (currentTargetIndex <= 4)
-                {
-                    // Provide a reward to the agent
-                    float reward = 20.0f;
-                    // Provide the reward to your reinforcement learning agent here
-                    Debug.Log("Agent hit target " + (currentTargetIndex - 1) + " and received a reward of " + reward);
-                }
+                //Messages to help me test
+                Debug.Log("Killed enemy " + collidedTargetIndex + " for a reward of +0.5");
             }
             else
             {
                 // The agent collided with the wrong target, end the episode
-                EndEpisode();
+                AddReward(-0.5f);
+                //EndEpisode();//TURN THIS BACK ON
+                Debug.Log("Wrong enemy collision. Penalty:-0.5 ");
             }
         }
         if (collision.collider.tag == "Wall")
         {
-            AddReward(-3f);
-            EndEpisode();
-            //EndEpisode();// I have not decided on this
+            AddReward(-1f);
+            EndEpisode() ;
+            Debug.Log("Collision with a wall. Penalty: -1");
         }
         if (collision.collider.tag == "Poison")
         {
-            AddReward(-6f);
+            AddReward(-1f);
             EndEpisode();
+            Debug.Log("Collision with poison. Penalty: -1");
         }
 
+        if (collision.collider.tag == "Finish")
+        {
+            AddReward(+1.5f);
+            EndEpisode();
+            Debug.Log("The game is over Boy, Reward: 1.5");
+        }
 
 
         // The checkpoint integration using the collision method
         if (collision.gameObject.CompareTag("MainPathCheck"))
         {
             int checkpointIndex = mainPathCheckpoints.GetCheckpointIndex(collision.gameObject);
-            if (checkpointIndex > previousMainPathCheckpointIndex)
+            if (checkpointIndex == expectedMainPathCheckpointIndex)
             {
-                MainPathCheckpointTriggered(true);
-                previousMainPathCheckpointIndex = checkpointIndex;
-
-                // Add a reward for passing the correct checkpoint on the main path
-                AddReward(1.0f);
-                Debug.Log("Passed the correct MAIN checkpoint with index: " + previousMainPathCheckpointIndex);
-
+                // The agent crossed the correct main path checkpoint
+                AddReward(+0.5f);
+                mainPathCheckpointIndex++;
+                expectedMainPathCheckpointIndex++;
+                Debug.Log("Crossed main path checkpoint " + checkpointIndex + ". Reward:0.5 ");
+            }
+            else if (checkpointIndex > expectedMainPathCheckpointIndex)
+            {
+                // The agent crossed a checkpoint out of order in the main path, apply a penalty
+                AddReward(-0.1f);
+                Debug.Log("Crossed main path checkpoint out of order. Penalty:-0.1 ");
             }
             else
             {
-                MainPathCheckpointTriggered(false);
-
-                // Apply a penalty for passing the wrong checkpoint on the main path
-                AddReward(-1.0f);
-                Debug.Log("Passed the Wrong MAIN checkpoint with index: " + previousMainPathCheckpointIndex);
-
+                // The agent crossed a checkpoint backward in the main path, apply a penalty
+                AddReward(-0.25f);
+                Debug.Log("Crossed main path checkpoint backward. Penalty:-0.25 ");
             }
         }
         else if (collision.gameObject.CompareTag("EnemyPathCheck"))
         {
             int checkpointIndex = branchPathCheckpoints.GetCheckpointIndex(collision.gameObject);
-            if (checkpointIndex > previousBranchPathCheckpointIndex)
+            if (checkpointIndex == expectedBranchPathCheckpointIndex)
             {
-                BranchPathCheckpointTriggered(true);
-                previousBranchPathCheckpointIndex = checkpointIndex;
-
-                // Add a reward for passing the correct checkpoint on the branch path
-                AddReward(2.0f);
-                Debug.Log("Passed the correct ENEMY PATH checkpoint with index: " + previousBranchPathCheckpointIndex);
-
+                // The agent crossed the correct enemy path checkpoint
+                AddReward(+0.25f);
+                branchPathCheckpointIndex++;
+                expectedBranchPathCheckpointIndex++;
+            }
+            else if (checkpointIndex > expectedBranchPathCheckpointIndex)
+            {
+                // The agent crossed a checkpoint out of order in the enemy path, apply a penalty
+                AddReward(-0.5f);
+                Debug.Log("Crossed enemy path checkpoint out of order. Penalty:-0.5 ");
             }
             else
             {
-                BranchPathCheckpointTriggered(false);
-
-                // Apply a smaller penalty for passing the wrong checkpoint on the branch path
-                AddReward(-0.5f);
-                Debug.Log("Passed the wrong ENEMY PATH checkpoint with index: " + previousBranchPathCheckpointIndex);
-
+                // The agent crossed a checkpoint backward in the enemy path, apply a penalty
+                //AddReward(-0.05f);
+                Debug.Log("Crossed enemy path checkpoint backward. Penalty:0.05 ");
             }
         }
+
     }
 
     public override void OnActionReceived(ActionBuffers actions)
@@ -272,11 +364,11 @@ public class SolderAgent : Agent
         transform.Rotate(Vector3.up, rotation * Time.fixedDeltaTime);
 
         // Check if the agent is moving
-        isWalking = (moveSpeed != 0) || (rotation != 0);
-        animator.SetBool("IsWalking", isWalking);
+        startWalking = (moveSpeed != 0) || (rotation != 0);
+        animator.SetBool("WalkNow", startWalking);
 
         // Apply a penalty for every step to encourage the agent to reach the goal
-        AddReward(-0.01f);
+        //AddReward(-0.01f);
     }
 
     public override void Heuristic(in ActionBuffers actionsOut)
@@ -301,16 +393,7 @@ public class SolderAgent : Agent
     {
         mainPathCheckpoints.OnCheckpointTriggered += MainPathCheckpointTriggered;
         branchPathCheckpoints.OnCheckpointTriggered += BranchPathCheckpointTriggered;
-
-        //I am testing this codes
-        // Store the initial positions of each target
-        initialPosition1 = Enemy1.transform.position;
-        initialPosition2 = Enemy2.transform.position;
-        initialPosition3 = Enemy3.transform.position;
-        initialPosition4 = Enemy4.transform.position;
-        // Initialize variables
         currentTargetIndex = 1;
-        episodeEnded = false;
     }
     private void MainPathCheckpointTriggered(bool isCorrectCheckpoint)
     {
@@ -330,57 +413,75 @@ public class SolderAgent : Agent
         Enemy2.transform.position = initialPosition2;
         Enemy3.transform.position = initialPosition3;
         Enemy4.transform.position = initialPosition4;
+        Enemy5.transform.position = initialPosition5;
+        Enemy6.transform.position = initialPosition6;
+        Enemy7.transform.position = initialPosition7;
+        Enemy8.transform.position = initialPosition8;
+        Enemy9.transform.position = initialPosition9;
+        Enemy10.transform.position = initialPosition10;
+        Enemy11.transform.position = initialPosition11;
+        Enemy12.transform.position = initialPosition12;
+        Enemy13.transform.position = initialPosition13;
+
+
         // Reset episode-related variables
         currentTargetIndex = 1;
-        episodeEnded = false;
 
         // Re-enable the renderer and collider components to make the objects visible and interactable
-        Renderer renderer1 = Enemy1.GetComponent<Renderer>();
-        Renderer renderer2 = Enemy2.GetComponent<Renderer>();
-        Renderer renderer3 = Enemy3.GetComponent<Renderer>();
-        Renderer renderer4 = Enemy4.GetComponent<Renderer>();
+        Renderer[] renderers = new Renderer[]
+        {
+        Enemy1.GetComponent<Renderer>(),
+        Enemy2.GetComponent<Renderer>(),
+        Enemy3.GetComponent<Renderer>(),
+        Enemy4.GetComponent<Renderer>(),
+        Enemy5.GetComponent<Renderer>(),
+        Enemy6.GetComponent<Renderer>(),
+        Enemy7.GetComponent<Renderer>(),
+        Enemy8.GetComponent<Renderer>(),
+        Enemy9.GetComponent<Renderer>(),
+        Enemy10.GetComponent<Renderer>(),
+        Enemy11.GetComponent<Renderer>(),
+        Enemy12.GetComponent<Renderer>(),
+        Enemy13.GetComponent<Renderer>(),
+        };
 
-        Collider collider1 = Enemy1.GetComponent<Collider>();
-        Collider collider2 = Enemy2.GetComponent<Collider>();
-        Collider collider3 = Enemy3.GetComponent<Collider>();
-        Collider collider4 = Enemy4.GetComponent<Collider>();
+        Collider[] colliders = new Collider[]
+    {
+        Enemy1.GetComponent<Collider>(),
+        Enemy2.GetComponent<Collider>(),
+        Enemy3.GetComponent<Collider>(),
+        Enemy4.GetComponent<Collider>(),
+        Enemy5.GetComponent<Collider>(),
+        Enemy6.GetComponent<Collider>(),
+        Enemy7.GetComponent<Collider>(),
+        Enemy8.GetComponent<Collider>(),
+        Enemy9.GetComponent<Collider>(),
+        Enemy10.GetComponent<Collider>(),
+        Enemy11.GetComponent<Collider>(),
+        Enemy12.GetComponent<Collider>(),
+        Enemy13.GetComponent<Collider>(),
 
-        if (renderer1 != null)
+    };
+
+        foreach (Renderer renderer in renderers)
         {
-            renderer1.enabled = true;
-        }
-        if (renderer2 != null)
-        {
-            renderer2.enabled = true;
-        }
-        if (renderer3 != null)
-        {
-            renderer3.enabled = true;
-        }
-        if (renderer4 != null)
-        {
-            renderer4.enabled = true;
+            if (renderer != null)
+            {
+                renderer.enabled = true; // Make the object visible
+            }
         }
 
-        if (collider1 != null)
+        foreach (Collider collider in colliders)
         {
-            collider1.enabled = true;
+            if (collider != null)
+            {
+                collider.enabled = true; // Make the object interactable
+            }
         }
-        if (collider2 != null)
-        {
-            collider2.enabled = true;
-        }
-        if (collider3 != null)
-        {
-            collider3.enabled = true;
-        }
-        if (collider4 != null)
-        {
-            collider4.enabled = true;
-        }
+
     }
 
-    //Testing still
+    //Getting the index of each enemy
     int GetTargetByIndex(GameObject target)
     {
         if (target == Enemy1)
@@ -398,6 +499,43 @@ public class SolderAgent : Agent
         else if (target == Enemy4)
         {
             return 4;
+        }
+
+        else if (target == Enemy5)
+        {
+            return 5;
+        }
+        else if (target == Enemy6)
+        {
+            return 6;
+        }
+        else if (target == Enemy7)
+        {
+            return 7;
+        }
+        else if (target == Enemy8)
+        {
+            return 8;
+        }
+        else if (target == Enemy9)
+        {
+            return 9;
+        }
+        else if (target == Enemy10)
+        {
+            return 10;
+        }
+        else if (target == Enemy11)
+        {
+            return 11;
+        }
+        else if (target == Enemy12)
+        {
+            return 12;
+        }
+        else if (target == Enemy13)
+        {
+            return 13;
         }
 
         return 0;
@@ -421,3 +559,4 @@ public class SolderAgent : Agent
     }
 
     }
+//mlagents-learn config/SolderAgent.yaml --run-id="Run 1"
