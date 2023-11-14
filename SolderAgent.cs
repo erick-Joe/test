@@ -5,17 +5,18 @@ using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 using UnityEditor.Timeline.Actions;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public class SolderAgent : Agent
 {
-    public List<Transform> MainPathChecks = new List<Transform>();
-    public List<Transform> EnemyPathChecks = new List<Transform>();
-    public Vector3 startingPosition = new Vector3(-2923.3f, 0f, 840.9f);
-    public CharacterController characterController;
+    public Vector3 startingPosition = new Vector3(-188.7f, 3f, 0f);
+    public Vector3 bossPosition = new Vector3(0f, 23.2f, -132.3f);
+    public Rigidbody rb;
     public float speed = 110f;
     public float rayCastLength = 60f;
     public float rotationSpeed = 180f;
-    float thresholdDistance = 5.5f;
+    public float maxDistanceToTarget = 50.2f;
+    private Vector3 currentTargetPosition;
     public Animator animator;
     //All enemies in the environment
     public GameObject Enemy1;
@@ -31,62 +32,39 @@ public class SolderAgent : Agent
     public GameObject Enemy11;
     public GameObject Enemy12;
     public GameObject Enemy13;
-
+    //Boss implementation
+    public GameObject Boss;
+    public GameObject MoneyPrefab;
+    public GameObject CoinPrefab;
+    private bool collected = false;
 
     private bool startWalking;
-    private Transform currentWaypoint;
-    private int currentWaypointIndex = 0;
     private object vectorAction;
-    private int mainPathCheckpointIndex;
-    private int branchPathCheckpointIndex;
-    //Variables to help me track the checkpoints
-    private int expectedMainPathCheckpointIndex = 0;
-    private int expectedBranchPathCheckpointIndex = 0;
-
-
 
     private int currentTargetIndex;
     // Positions of the enemies (now exposed in the Unity Editor)
-    public Vector3 initialPosition1 = new Vector3(-2627.23f, 0f, 52.2f);
-    public Vector3 initialPosition2 = new Vector3(-3418.9f, 0f, 37.9f);
-    public Vector3 initialPosition3 = new Vector3(-3420.1f, 0f, -571.7f);
-    public Vector3 initialPosition4 = new Vector3(-2912.0f, 0f, -1369f);
-    public Vector3 initialPosition5 = new Vector3(-1911.5f, 0f, -1307f);
-    public Vector3 initialPosition6 = new Vector3(-1902.5f, 0f, -577.7f);
-    public Vector3 initialPosition7 = new Vector3(-2046f, 0f, 16.2f);
-    public Vector3 initialPosition8 = new Vector3(-2517.8f, 0f, 39f);
-    public Vector3 initialPosition9 = new Vector3(-1932.9f, 0f, 28.4f);
-    public Vector3 initialPosition10 = new Vector3(-1164f, 0f, 28.4f);
-    public Vector3 initialPosition11 = new Vector3(-1679.6f, 0f, -1320.1f);
-    public Vector3 initialPosition12 = new Vector3(-1424f, 0f, -570f);
-    public Vector3 initialPosition13 = new Vector3(-1164f, 0f, -570f);
+    public Vector3 initialPosition1 = new Vector3(-188.0f, 10.9f, 197.0f);
+    public Vector3 initialPosition2 = new Vector3(-69.0f, 10.9f, 197.0f);
+    public Vector3 initialPosition3 = new Vector3(57.0f, 10.9f, 203.0f);
+    public Vector3 initialPosition4 = new Vector3(173.0f, 10.9f, 201.0f);
+    public Vector3 initialPosition5 = new Vector3(177.0f, 10.9f, 42.0f);
+    public Vector3 initialPosition6 = new Vector3(179.0f, 10.9f, -143.0f);
+    public Vector3 initialPosition7 = new Vector3(-184.0f, 10.9f, -149.0f);
+    public Vector3 initialPosition8 = new Vector3(-182.0f, 10.9f, 42.0f);
+    public Vector3 initialPosition9 = new Vector3(-117.0f, 10.9f, 90.0f);
+    public Vector3 initialPosition10 = new Vector3(-3.0f, 10.9f, 90.0f);
+    public Vector3 initialPosition11 = new Vector3(112.0f, 10.9f, 92.0f);
+    public Vector3 initialPosition12 = new Vector3(61.0f, 10.9f, -12.0f);
+    public Vector3 initialPosition13 = new Vector3(-102.0f, 10.9f, -7.0f);
 
-
-
-    [SerializeField] private MainPathCheckManager mainPathCheckpoints;
-    [SerializeField] private EnemyPathCheckManager branchPathCheckpoints;
-    [SerializeField] private string CheckpointTag;
 
     public override void Initialize()
     {
-        // Initialize the list of main path checkpoints
-        foreach (GameObject checkpointObject in GameObject.FindGameObjectsWithTag("MainPathCheck"))
-        {
-            MainPathChecks.Add(checkpointObject.transform); 
-        }
 
-        // Initialize the list of enemy branch checkpoints
-        foreach (GameObject checkpointObject in GameObject.FindGameObjectsWithTag("EnemyPathCheck"))
+        if (rb == null)
         {
-            EnemyPathChecks.Add(checkpointObject.transform); 
+            rb = GetComponent<Rigidbody>();
         }
-
-        // Initialize the first checkpoint
-        if (MainPathChecks.Count > 0)
-        {
-            currentWaypoint = MainPathChecks[currentWaypointIndex];
-        }
-
     }
 
 
@@ -96,29 +74,14 @@ public class SolderAgent : Agent
         transform.position = startingPosition;
         transform.rotation = Quaternion.Euler(0f, 180f, 0f);
 
-
-        // Reseting used variables
-        currentWaypointIndex = 0;
-        mainPathCheckpointIndex = 0;
-        branchPathCheckpointIndex = 0;
-        expectedMainPathCheckpointIndex = 0;
-        expectedBranchPathCheckpointIndex = 0;
-
+        // Set the initial target position
+        currentTargetPosition = Enemy1.transform.position;
+        collected = false;
 
 
         //animations
         startWalking = false;
         animator.SetBool("WalkNow", startWalking);
-
-        // Reset checkpoints
-        if (MainPathChecks.Count > 0)
-        {
-            currentWaypoint = MainPathChecks[currentWaypointIndex];
-        }
-        else
-        {
-            currentWaypoint = null;
-        }
 
         //Call the function to reset the episode and environment
         ResetEpisode();
@@ -128,123 +91,20 @@ public class SolderAgent : Agent
 
     public override void CollectObservations(VectorSensor sensor)
     {
-        // Observations for the nearest checkpoint
-        if (currentWaypoint != null)
-        {
-            Vector3 toWaypoint = currentWaypoint.position - transform.position;
-            sensor.AddObservation(toWaypoint.normalized);
-            sensor.AddObservation(toWaypoint.magnitude); 
-        }
-        else
-        {
-            sensor.AddObservation(Vector3.zero);
-            sensor.AddObservation(0f); 
-        }
+        //1 Value
+        sensor.AddObservation(collected);
 
-        // The position of the agent
-        sensor.AddObservation(transform.position.x);
-        sensor.AddObservation(transform.position.y);
-        sensor.AddObservation(transform.position);
+        // Direction Agent is facing (1 Vector3 = 3 values)
+        sensor.AddObservation(transform.forward);
 
-        // Raycast to detect enemies, walls, and checkpoints
-        Ray ray = new Ray(transform.position, transform.forward);
-        RaycastHit hit;
-        if (Physics.Raycast(ray, out hit, rayCastLength))
-        {
-            GameObject hitObject = hit.collider.gameObject;
+        // Current target position (3 values for x, y, and z)
+        sensor.AddObservation(currentTargetPosition.x);
+        sensor.AddObservation(currentTargetPosition.y);
+        sensor.AddObservation(currentTargetPosition.z);
 
-            if (hitObject.CompareTag("Enemy"))
-            {
-                // Get the enemy's position and calculate the distance to it
-                Vector3 enemyPosition = hitObject.transform.position;
-                float distanceToEnemy = Vector3.Distance(transform.position, enemyPosition);
-                Debug.Log(distanceToEnemy);
-                if (distanceToEnemy < thresholdDistance)
-                {
-                    // The agent is near an enemy, provide a reward of +5
-                    sensor.AddObservation(enemyPosition);
-                    sensor.AddObservation(distanceToEnemy);
+        // Distance to current target position (1 float = 1 value)
+        sensor.AddObservation(Vector3.Distance(currentTargetPosition, transform.position));
 
-                    AddReward(0.0625f);
-                    Debug.Log("Near an enemy. Reward: 0.0625");
-                }
-                else
-                {
-                    // The agent is not within the threshold distance of the enemy
-                    sensor.AddObservation(Vector3.zero);
-                    sensor.AddObservation(0f);
-                }
-
-
-            }
-            else
-            {
-                sensor.AddObservation(Vector3.zero);
-                sensor.AddObservation(0f);
-            }
-
-            if (hitObject.CompareTag("Wall"))
-            {
-                sensor.AddObservation(hitObject.transform.position);
-                float distanceToWall = Vector3.Distance(transform.position, hitObject.transform.position);
-                sensor.AddObservation(distanceToWall);
-            }
-            else
-            {
-                sensor.AddObservation(Vector3.zero); 
-                sensor.AddObservation(0f); 
-            }
-
-            if (hitObject.CompareTag("Poison"))
-            {
-                sensor.AddObservation(hitObject.transform.position);
-                float distanceToPoison = Vector3.Distance(transform.position, hitObject.transform.position);
-                sensor.AddObservation(distanceToPoison);
-            }
-            else
-            {
-                sensor.AddObservation(Vector3.zero); 
-                sensor.AddObservation(0f); 
-            }
-
-            if (hitObject.CompareTag("EnemyPathCheck"))
-            {
-                sensor.AddObservation(hitObject.transform.position);
-                float distanceToEnemyPathCheck = Vector3.Distance(transform.position, hitObject.transform.position);
-                sensor.AddObservation(distanceToEnemyPathCheck);
-            }
-            else
-            {
-                sensor.AddObservation(Vector3.zero);
-                sensor.AddObservation(0f); 
-            }
-
-            if (hitObject.CompareTag("MainPathCheck"))
-            {
-                sensor.AddObservation(hitObject.transform.position);
-                float distanceToMainPathCheck = Vector3.Distance(transform.position, hitObject.transform.position);
-                sensor.AddObservation(distanceToMainPathCheck);
-            }
-            else
-            {
-                sensor.AddObservation(Vector3.zero);
-                sensor.AddObservation(0f); 
-            }
-        }
-        else
-        {
-            // Filling with zeros if no ray hit
-            sensor.AddObservation(Vector3.zero);
-            sensor.AddObservation(0f);
-            sensor.AddObservation(Vector3.zero);
-            sensor.AddObservation(0f);
-            sensor.AddObservation(Vector3.zero);
-            sensor.AddObservation(0f);
-            sensor.AddObservation(Vector3.zero);
-            sensor.AddObservation(0f);
-            sensor.AddObservation(Vector3.zero);
-            sensor.AddObservation(0f);
-        }
     }
 
 
@@ -253,123 +113,557 @@ public class SolderAgent : Agent
     {
         if (collision.gameObject.CompareTag("Enemy"))
         {
+            SetCurrentTargetPosition();
             GameObject collidedTarget = collision.gameObject;
             int collidedTargetIndex = GetTargetByIndex(collidedTarget);
 
-            if (collidedTargetIndex == currentTargetIndex)
+            if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 1)
             {
-                // The agent collided with the correct target
-                AddReward(+0.5f);
-                DisableTarget(collidedTarget);
-                currentTargetIndex++;
-
-                //Messages to help me test
-                Debug.Log("Killed enemy " + collidedTargetIndex + " for a reward of +0.5");
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
             }
-            else
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 2)
             {
-                // The agent collided with the wrong target, end the episode
-                AddReward(-0.5f);
-                //EndEpisode();//TURN THIS BACK ON
-                Debug.Log("Wrong enemy collision. Penalty:-0.5 ");
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 3)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 4)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 5)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 6)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 7)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 8)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 9)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    // The agent collided with the correct target, but Collect is true
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 10)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 11)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 12)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    currentTargetPosition = Boss.transform.position;
+                }
+            }
+            else if (collidedTargetIndex == currentTargetIndex && collidedTargetIndex == 13)
+            {
+                if (!collected)
+                {
+                    // The agent collided with the correct target, and Collect is false
+                    AddReward(1f);
+                    DisableTarget(collidedTarget);
+                    currentTargetIndex++;
+                    collected = true;
+                    currentTargetPosition = Boss.transform.position;
+                }
+                else
+                {
+                    currentTargetPosition = Boss.transform.position;
+                }
             }
         }
         if (collision.collider.tag == "Wall")
         {
-            AddReward(-1f);
-            EndEpisode() ;
-            Debug.Log("Collision with a wall. Penalty: -1");
-        }
-        if (collision.collider.tag == "Poison")
-        {
-            AddReward(-1f);
+            AddReward(-1.1f);
             EndEpisode();
-            Debug.Log("Collision with poison. Penalty: -1");
+            Debug.Log("COLLIDED WITH WALL");
         }
 
-        if (collision.collider.tag == "Finish")
+        if (collision.collider.tag == "Boss")
         {
-            AddReward(+1.5f);
-            EndEpisode();
-            Debug.Log("The game is over Boy, Reward: 1.5");
+            if (currentTargetIndex == 1)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy1.transform.position;
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy2.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+                }
+            }
+
+            if (currentTargetIndex == 2)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy2.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy3.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 3)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy3.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy4.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 4)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy4.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy5.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 5)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy5.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy6.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 6)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy6.transform.position;
+
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy7.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 7)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy7.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy8.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 8)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy8.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy9.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 9)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy9.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy10.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 10)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy10.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy11.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 11)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy11.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy12.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 12)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy12.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy13.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+            if (currentTargetIndex == 13)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy13.transform.position;
+
+                }
+                else
+                {
+                    SpawnThings();
+                    currentTargetPosition = Enemy13.transform.position;
+                    AddReward(0.1f);
+                    collected = false;
+
+                }
+            }
+
+            if (currentTargetIndex == 14)
+            {
+                if (!collected)
+                {
+                    currentTargetPosition = Enemy13.transform.position;
+
+                }
+                else
+                {
+                    AddReward(0.1f);
+                    EndEpisode();
+
+                }
+            }
+
         }
 
 
-        // The checkpoint integration using the collision method
-        if (collision.gameObject.CompareTag("MainPathCheck"))
+    }
+
+    private void SetCurrentTargetPosition()
+    {
+        if (!collected)
         {
-            int checkpointIndex = mainPathCheckpoints.GetCheckpointIndex(collision.gameObject);
-            if (checkpointIndex == expectedMainPathCheckpointIndex)
+            // The agent collided with the correct target, and Collect is false
+
+            switch (currentTargetIndex)
             {
-                // The agent crossed the correct main path checkpoint
-                AddReward(+0.5f);
-                mainPathCheckpointIndex++;
-                expectedMainPathCheckpointIndex++;
-                Debug.Log("Crossed main path checkpoint " + checkpointIndex + ". Reward:0.5 ");
-            }
-            else if (checkpointIndex > expectedMainPathCheckpointIndex)
-            {
-                // The agent crossed a checkpoint out of order in the main path, apply a penalty
-                AddReward(-0.1f);
-                Debug.Log("Crossed main path checkpoint out of order. Penalty:-0.1 ");
-            }
-            else
-            {
-                // The agent crossed a checkpoint backward in the main path, apply a penalty
-                AddReward(-0.25f);
-                Debug.Log("Crossed main path checkpoint backward. Penalty:-0.25 ");
+                case 1:
+                    currentTargetPosition = Enemy1.transform.position;
+                    break;
+                case 2:
+                    currentTargetPosition = Enemy2.transform.position;
+                    break;
+                case 3:
+                    currentTargetPosition = Enemy3.transform.position;
+                    break;
+                case 4:
+                    currentTargetPosition = Enemy4.transform.position;
+                    break;
+                case 5:
+                    currentTargetPosition = Enemy5.transform.position;
+                    break;
+                case 6:
+                    currentTargetPosition = Enemy6.transform.position;
+                    break;
+                case 7:
+                    currentTargetPosition = Enemy7.transform.position;
+                    break;
+                case 8:
+                    currentTargetPosition = Enemy8.transform.position;
+                    break;
+                case 9:
+                    currentTargetPosition = Enemy9.transform.position;
+                    break;
+                case 10:
+                    currentTargetPosition = Enemy10.transform.position;
+                    break;
+                case 11:
+                    currentTargetPosition = Enemy11.transform.position;
+                    break;
+                case 12:
+                    currentTargetPosition = Enemy12.transform.position;
+                    break;
+                case 13:
+                    currentTargetPosition = Enemy13.transform.position;
+                    break;
             }
         }
-        else if (collision.gameObject.CompareTag("EnemyPathCheck"))
+        else
         {
-            int checkpointIndex = branchPathCheckpoints.GetCheckpointIndex(collision.gameObject);
-            if (checkpointIndex == expectedBranchPathCheckpointIndex)
-            {
-                // The agent crossed the correct enemy path checkpoint
-                AddReward(+0.25f);
-                branchPathCheckpointIndex++;
-                expectedBranchPathCheckpointIndex++;
-            }
-            else if (checkpointIndex > expectedBranchPathCheckpointIndex)
-            {
-                // The agent crossed a checkpoint out of order in the enemy path, apply a penalty
-                AddReward(-0.5f);
-                Debug.Log("Crossed enemy path checkpoint out of order. Penalty:-0.5 ");
-            }
-            else
-            {
-                // The agent crossed a checkpoint backward in the enemy path, apply a penalty
-                //AddReward(-0.05f);
-                Debug.Log("Crossed enemy path checkpoint backward. Penalty:0.05 ");
-            }
+            // The agent collided with the correct target, but Collect is true
+            currentTargetPosition = Boss.transform.position;
         }
 
     }
 
     public override void OnActionReceived(ActionBuffers actions)
     {
+        // Normal movement based on actions
         var actionTaken = actions.ContinuousActions;
 
+        // Use index 0 for forward movement and index 1 for turning
         float moveDirection = actionTaken[0];
         float turnDirection = actionTaken[1];
 
         // Calculate forward movement
-        float moveSpeed = moveDirection * speed;
-        transform.Translate(Vector3.forward * moveSpeed * Time.fixedDeltaTime);
+        Vector3 moveVector = transform.forward * moveDirection * speed;
 
-        // Calculate rotation based on turnDirection
-        float rotation = turnDirection * rotationSpeed;
+        // Check if the agent is close to the target position
+        float distanceToTarget = Vector3.Distance(transform.position, currentTargetPosition);
+
+        // Adjust movement based on the distance to the target
+        float movementMultiplier = Mathf.Clamp01(distanceToTarget / maxDistanceToTarget);
+        moveVector *= movementMultiplier;
+
+        // Apply movement using Rigidbody
+        rb.MovePosition(rb.position + moveVector * Time.fixedDeltaTime);
 
         // Rotate the agent
-        transform.Rotate(Vector3.up, rotation * Time.fixedDeltaTime);
+        float rotation = turnDirection * rotationSpeed * Time.fixedDeltaTime;
+        rb.MoveRotation(rb.rotation * Quaternion.Euler(Vector3.up * rotation));
 
         // Check if the agent is moving
-        startWalking = (moveSpeed != 0) || (rotation != 0);
+        startWalking = (moveDirection != 0) || (turnDirection != 0);
         animator.SetBool("WalkNow", startWalking);
 
         // Apply a penalty for every step to encourage the agent to reach the goal
-        //AddReward(-0.01f);
+        //if (MaxStep > 0) AddReward(-1f / MaxStep);
     }
+
 
     public override void Heuristic(in ActionBuffers actionsOut)
     {
@@ -391,19 +685,9 @@ public class SolderAgent : Agent
 
     private void Start()
     {
-        mainPathCheckpoints.OnCheckpointTriggered += MainPathCheckpointTriggered;
-        branchPathCheckpoints.OnCheckpointTriggered += BranchPathCheckpointTriggered;
         currentTargetIndex = 1;
     }
-    private void MainPathCheckpointTriggered(bool isCorrectCheckpoint)
-    {
-       
-    }
-
-    private void BranchPathCheckpointTriggered(bool isCorrectCheckpoint)
-    {
-        
-    }
+   
 
     //I am testing this codes
     private void ResetEpisode()
@@ -422,62 +706,11 @@ public class SolderAgent : Agent
         Enemy11.transform.position = initialPosition11;
         Enemy12.transform.position = initialPosition12;
         Enemy13.transform.position = initialPosition13;
+        Boss.transform.position = bossPosition;
 
 
         // Reset episode-related variables
         currentTargetIndex = 1;
-
-        // Re-enable the renderer and collider components to make the objects visible and interactable
-        Renderer[] renderers = new Renderer[]
-        {
-        Enemy1.GetComponent<Renderer>(),
-        Enemy2.GetComponent<Renderer>(),
-        Enemy3.GetComponent<Renderer>(),
-        Enemy4.GetComponent<Renderer>(),
-        Enemy5.GetComponent<Renderer>(),
-        Enemy6.GetComponent<Renderer>(),
-        Enemy7.GetComponent<Renderer>(),
-        Enemy8.GetComponent<Renderer>(),
-        Enemy9.GetComponent<Renderer>(),
-        Enemy10.GetComponent<Renderer>(),
-        Enemy11.GetComponent<Renderer>(),
-        Enemy12.GetComponent<Renderer>(),
-        Enemy13.GetComponent<Renderer>(),
-        };
-
-        Collider[] colliders = new Collider[]
-    {
-        Enemy1.GetComponent<Collider>(),
-        Enemy2.GetComponent<Collider>(),
-        Enemy3.GetComponent<Collider>(),
-        Enemy4.GetComponent<Collider>(),
-        Enemy5.GetComponent<Collider>(),
-        Enemy6.GetComponent<Collider>(),
-        Enemy7.GetComponent<Collider>(),
-        Enemy8.GetComponent<Collider>(),
-        Enemy9.GetComponent<Collider>(),
-        Enemy10.GetComponent<Collider>(),
-        Enemy11.GetComponent<Collider>(),
-        Enemy12.GetComponent<Collider>(),
-        Enemy13.GetComponent<Collider>(),
-
-    };
-
-        foreach (Renderer renderer in renderers)
-        {
-            if (renderer != null)
-            {
-                renderer.enabled = true; // Make the object visible
-            }
-        }
-
-        foreach (Collider collider in colliders)
-        {
-            if (collider != null)
-            {
-                collider.enabled = true; // Make the object interactable
-            }
-        }
 
     }
 
@@ -543,20 +776,68 @@ public class SolderAgent : Agent
     //Codes under test
     void DisableTarget(GameObject target)
     {
-        // Disable the renderer and collider of the target object
-        Renderer renderer = target.GetComponent<Renderer>();
-        Collider collider = target.GetComponent<Collider>();
+        // Get the index of the target
+        int targetIndex = GetTargetByIndex(target);
 
-        if (renderer != null)
-        {
-            renderer.enabled = false; // Make the object not visible
-        }
-
-        if (collider != null)
-        {
-            collider.enabled = false; // Make the object not interactable
-        }
+        // Change the position of the enemy based on its index
+        Vector3 newPosition = GetNewEnemyPosition(targetIndex);
+        target.transform.position = newPosition;
     }
 
+
+    // Function to get the new position based on the target index
+    Vector3 GetNewEnemyPosition(int targetIndex)
+    {
+        switch (targetIndex)
+        {
+            case 1:
+                return new Vector3(199.0f, 10.9f, -293.2f);
+            case 2:
+                return new Vector3(153.0f, 10.9f, -293.2f);
+            case 3:
+                return new Vector3(99.0f, 10.9f, -293.2f);
+            case 4:
+                return new Vector3(153.0f, 10.9f, - 293.2f);
+            case 5:
+                return new Vector3(48.0f, 10.9f, -293.2f);
+            case 6:
+                return new Vector3(-2.0f, 10.9f, -293.2f);
+            case 7:
+                return new Vector3(-48.0f, 10.9f, -293.2f);
+            case 8:
+                return new Vector3(-97.0f, 10.9f, -293.2f);
+            case 9:
+                return new Vector3(-153.0f, 10.9f, -293.2f);
+            case 10:
+                return new Vector3(-198.0f, 10.9f, -293.2f);
+            case 11:
+                return new Vector3(-20.0f, 10.9f, -304.2f);
+            case 12:
+                return new Vector3(-182.0f, 10.9f, -304.2f);
+            case 13:
+                return new Vector3(121.0f, 10.9f, -304.2f);
+            default:
+                // If the index is not recognized, return a default position
+                return Vector3.zero;
+        }
     }
+    
+    private void SpawnThings()
+    {
+        // Spawn money prefab at the specified position
+        GameObject money = Instantiate(MoneyPrefab, new Vector3(-69.5f, 4.9f, -84.3f), Quaternion.identity);
+
+        // Destroy the money prefab after 4 seconds
+        Destroy(money, 6f);
+
+        // Spawn CoinPrefab just above the agent's position with adjusted height
+        GameObject coin = Instantiate(CoinPrefab, new Vector3(25.5f, -18.0f, -82.2f), Quaternion.identity);
+
+        // Destroy the coin prefab after 4 seconds
+        Destroy(coin, 10f);
+    }
+
+}
 //mlagents-learn config/SolderAgent.yaml --run-id="Run 1"
+//mlagents-learn config/SolderAgent.yaml --run-id="TRAINING" --no-graphics
+
